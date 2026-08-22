@@ -1,0 +1,14 @@
+{
+  "items": [
+    {
+      "platform": "xiaohongshu",
+      "item_type": "comment",
+      "counterparty_display_name": "示例用户",
+      "original_text": "请问这个方法新手也能用吗？",
+      "platform_item_id": "example-comment-001",
+      "source_url": "https://www.xiaohongshu.com/explore/example",
+      "observed_at": "2026-08-21T09:00:00-07:00"
+    }
+  ]
+}
+

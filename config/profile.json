@@ -1,0 +1,28 @@
+{
+  "max_reply_chars": 300,
+  "monitor": {
+    "platforms": [
+      "xiaohongshu",
+      "instagram"
+    ],
+    "max_new_items_per_run": 20,
+    "default_time": "09:00",
+    "timezone": "local"
+  },
+  "approval": {
+    "exact_confirmation": "OK",
+    "auto_send": false,
+    "auto_publish": false
+  },
+  "voice_profile": {
+    "summary": "自然、口语化、温和但不失立场；先回应对方真正的问题，不端着，不说空话，不编造事实或承诺。",
+    "preferred_phrases": [],
+    "avoid_phrases": [
+      "作为一个AI",
+      "感谢您的宝贵意见",
+      "我们高度重视"
+    ],
+    "examples": []
+  }
+}
+

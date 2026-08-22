@@ -1,0 +1,8 @@
+interface:
+  display_name: "Calmanta Personal"
+  short_description: "Draft-first local social inbox monitoring workflow"
+  brand_color: "#6F8F7C"
+  default_prompt: "Use $calmanta-personal to check Instagram and Xiaohongshu once, save only new actionable drafts for my approval, and never send or publish automatically."
+
+policy:
+  allow_implicit_invocation: true
