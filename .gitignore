@@ -3,6 +3,8 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .venv/
+config/profile.local.json
+config/profile.json
 *.zip
 data/*
 !data/.gitkeep

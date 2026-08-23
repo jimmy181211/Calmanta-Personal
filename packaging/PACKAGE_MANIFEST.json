@@ -1,0 +1,23 @@
+{
+  "package_name": "Calmanta-Personal-Package",
+  "package_version": "0.1.0",
+  "created_on": "2026-08-22",
+  "contents": [
+    "START_HERE.md",
+    "Calmanta-Personal/",
+    "Calmanta-Core/"
+  ],
+  "runtime_dependencies": {
+    "calmanta_official": false,
+    "postgresql": false,
+    "object_storage": false,
+    "model_api": false,
+    "python": ">=3.11 or the ChatGPT/Codex bundled runtime"
+  },
+  "excluded_private_paths": [
+    "Calmanta-Personal/config/profile.local.json",
+    "Calmanta-Personal/data/",
+    "Calmanta-Personal/staging/",
+    "all .git, .venv, cache, database, and compiled files"
+  ]
+}

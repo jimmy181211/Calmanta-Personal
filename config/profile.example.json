@@ -1,0 +1,23 @@
+{
+  "max_reply_chars": 300,
+  "monitor": {
+    "platforms": ["xiaohongshu", "instagram"],
+    "max_new_items_per_run": 20,
+    "default_time": "09:00",
+    "timezone": "local"
+  },
+  "approval": {
+    "exact_confirmation": "OK",
+    "auto_send": false,
+    "auto_publish": false
+  },
+  "risk_level_actions": {
+    "no_risk": "record_only",
+    "low": "record_only",
+    "medium": "generate_draft",
+    "high": "generate_draft"
+  },
+  "voice_profile": {
+    "custom_templates": []
+  }
+}

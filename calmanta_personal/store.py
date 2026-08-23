@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator
-
+from typing import Any
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS work_items (
@@ -15,13 +15,19 @@ CREATE TABLE IF NOT EXISTS work_items (
     item_type TEXT NOT NULL,
     counterparty_key TEXT NOT NULL DEFAULT '',
     counterparty_display_name TEXT NOT NULL DEFAULT '',
-    original_text TEXT NOT NULL,
+    counterparty_text TEXT NOT NULL DEFAULT '',
+    owner_context_text TEXT NOT NULL DEFAULT '',
+    conversation_relation TEXT NOT NULL DEFAULT 'not_applicable',
+    direction_verified INTEGER NOT NULL DEFAULT 0,
+    role_resolution_source TEXT NOT NULL DEFAULT '',
+    user_intent_text TEXT NOT NULL DEFAULT '',
     platform_item_id TEXT NOT NULL DEFAULT '',
     source_url TEXT NOT NULL DEFAULT '',
     observed_at TEXT NOT NULL DEFAULT '',
     decision TEXT NOT NULL,
     state TEXT NOT NULL,
     sensitive_tags_json TEXT NOT NULL DEFAULT '[]',
+    category TEXT NOT NULL DEFAULT '未分类',
     risk_level TEXT NOT NULL DEFAULT 'low',
     rationale TEXT NOT NULL DEFAULT '',
     voice_profile_json TEXT NOT NULL DEFAULT '{}',
@@ -77,6 +83,7 @@ class LocalStore:
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as connection:
             connection.executescript(SCHEMA)
+            self._migrate_work_item_roles(connection)
 
     def has_fingerprint(self, fingerprint: str) -> bool:
         with self._connect() as connection:
@@ -94,13 +101,19 @@ class LocalStore:
             "item_type",
             "counterparty_key",
             "counterparty_display_name",
-            "original_text",
+            "counterparty_text",
+            "owner_context_text",
+            "conversation_relation",
+            "direction_verified",
+            "role_resolution_source",
+            "user_intent_text",
             "platform_item_id",
             "source_url",
             "observed_at",
             "decision",
             "state",
             "sensitive_tags_json",
+            "category",
             "risk_level",
             "rationale",
             "voice_profile_json",
@@ -116,8 +129,8 @@ class LocalStore:
         record["preview_payload_json"] = _json(record.pop("preview_payload", {}))
         values = [record.get(column, "") for column in columns]
         placeholders = ", ".join("?" for _ in columns)
-        insert_sql = (  # noqa: S608 - column names are a fixed list above.
-            f"INSERT INTO work_items ({', '.join(columns)}) VALUES ({placeholders})"
+        insert_sql = (
+            f"INSERT INTO work_items ({', '.join(columns)}) VALUES ({placeholders})"  # noqa: S608 - column names are a fixed list above.
         )
         try:
             with self._connect() as connection:
@@ -361,6 +374,41 @@ class LocalStore:
             (work_item_id, event_type, _json(details), created_at),
         )
 
+    @staticmethod
+    def _migrate_work_item_roles(connection: sqlite3.Connection) -> None:
+        columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(work_items)").fetchall()
+        }
+        if "original_text" in columns and "counterparty_text" not in columns:
+            connection.execute("ALTER TABLE work_items RENAME COLUMN original_text TO counterparty_text")
+            columns.remove("original_text")
+            columns.add("counterparty_text")
+        additions = {
+            "owner_context_text": "TEXT NOT NULL DEFAULT ''",
+            "conversation_relation": "TEXT NOT NULL DEFAULT 'unknown'",
+            "direction_verified": "INTEGER NOT NULL DEFAULT 0",
+            "role_resolution_source": "TEXT NOT NULL DEFAULT 'legacy_unverified'",
+            "user_intent_text": "TEXT NOT NULL DEFAULT ''",
+            "category": "TEXT NOT NULL DEFAULT '未分类'",
+        }
+        for column, definition in additions.items():
+            if column not in columns:
+                connection.execute(
+                    f"ALTER TABLE work_items ADD COLUMN {column} {definition}"  # noqa: S608 - values come from the fixed additions mapping above.
+                )
+        connection.execute(
+            """
+            UPDATE work_items
+            SET user_intent_text = counterparty_text,
+                counterparty_text = '',
+                conversation_relation = 'not_applicable',
+                direction_verified = 1,
+                role_resolution_source = 'legacy_post'
+            WHERE item_type = 'post' AND user_intent_text = ''
+            """
+        )
+
 
 def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -370,6 +418,8 @@ def _row(row: sqlite3.Row | None) -> dict[str, Any] | None:
     if row is None:
         return None
     result = dict(row)
+    if "direction_verified" in result:
+        result["direction_verified"] = bool(result["direction_verified"])
     for database_field, public_field in JSON_FIELDS.items():
         result[public_field] = json.loads(result.pop(database_field))
     return result

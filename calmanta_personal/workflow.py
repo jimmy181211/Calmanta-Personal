@@ -7,13 +7,17 @@ from typing import Any
 from uuid import uuid4
 
 from .core_bridge import CoreTools
+from .profile_settings import RISK_LEVELS, ProfileSettings
 from .store import LocalStore
 
 ALLOWED_PLATFORMS = {"instagram", "xiaohongshu"}
 ALLOWED_ITEM_TYPES = {"message", "comment", "post"}
 ALLOWED_AI_DECISIONS = {"draft", "no_reply", "escalate", "block"}
-
-
+ALLOWED_CONVERSATION_RELATIONS = {
+    "direct_message",
+    "top_level_comment",
+    "reply_to_owner",
+}
 class PersonalWorkflow:
     def __init__(self, store: LocalStore, core: CoreTools, profile_path: Path):
         self.store = store
@@ -47,7 +51,8 @@ class PersonalWorkflow:
     def validate_edited_draft(self, item: dict[str, Any], draft_text: str) -> None:
         cleaned = draft_text.strip()
         hard_limit = 3000 if item["item_type"] == "post" else self.max_reply_chars
-        problems = self.core.validate_reply(cleaned, item["original_text"], hard_limit)
+        source_text = item["user_intent_text"] if item["item_type"] == "post" else item["counterparty_text"]
+        problems = self.core.validate_reply(cleaned, source_text, hard_limit)
         if problems:
             raise ValueError("Draft failed Calmanta safety checks: " + ", ".join(problems))
 
@@ -58,14 +63,10 @@ class PersonalWorkflow:
 
     def voice_profile(self) -> dict[str, Any]:
         raw = self._profile().get("voice_profile", {})
-        if not isinstance(raw, dict):
-            raise ValueError("config/profile.json voice_profile must be an object")
-        return {
-            "summary": str(raw.get("summary", ""))[:1000],
-            "preferred_phrases": _string_list(raw.get("preferred_phrases"), 10, 500),
-            "avoid_phrases": _string_list(raw.get("avoid_phrases"), 10, 500),
-            "examples": _string_list(raw.get("examples"), 10, 500),
-        }
+        return self.core.normalize_voice_profile(raw)
+
+    def risk_level_actions(self) -> dict[str, str]:
+        return ProfileSettings(self.profile_path).risk_level_actions()
 
     def _normalize(self, raw: dict[str, Any], include_decision: bool) -> dict[str, Any]:
         if not isinstance(raw, dict):
@@ -77,20 +78,54 @@ class PersonalWorkflow:
             raise ValueError(f"Unsupported Personal platform: {platform}")
         if item_type not in ALLOWED_ITEM_TYPES:
             raise ValueError(f"Unsupported item_type: {item_type}")
-        original_text = str(raw.get("original_text", "")).strip()
-        if not original_text:
-            raise ValueError("original_text is required")
-        if len(original_text) > 10_000:
-            raise ValueError("original_text exceeds 10000 characters")
         counterparty = str(raw.get("counterparty_display_name", "")).strip()[:200]
         if item_type != "post" and not counterparty:
             raise ValueError("counterparty_display_name is required")
+        counterparty_text = ""
+        owner_context_text = ""
+        conversation_relation = "not_applicable"
+        direction_verified = item_type == "post"
+        role_resolution_source = "not_applicable" if item_type == "post" else ""
+        user_intent_text = ""
+        if item_type == "post":
+            user_intent_text = str(raw.get("user_intent_text", "")).strip()
+            if not user_intent_text:
+                raise ValueError("user_intent_text is required for posts")
+            if len(user_intent_text) > 10_000:
+                raise ValueError("user_intent_text exceeds 10000 characters")
+        else:
+            counterparty_text = str(raw.get("counterparty_text", "")).strip()
+            if not counterparty_text:
+                raise ValueError(
+                    "counterparty_text is required and must contain only the other person's content"
+                )
+            if len(counterparty_text) > 10_000:
+                raise ValueError("counterparty_text exceeds 10000 characters")
+            owner_context_text = str(raw.get("owner_context_text", "")).strip()
+            if len(owner_context_text) > 10_000:
+                raise ValueError("owner_context_text exceeds 10000 characters")
+            conversation_relation = str(raw.get("conversation_relation", "")).strip()
+            if conversation_relation not in ALLOWED_CONVERSATION_RELATIONS:
+                raise ValueError("conversation_relation must identify a verified inbound item")
+            direction_verified = raw.get("direction_verified") is True
+            if not direction_verified:
+                raise ValueError("direction_verified must be true before a draft can be created")
+            role_resolution_source = str(raw.get("role_resolution_source", "")).strip()[:100]
+            if not role_resolution_source:
+                raise ValueError("role_resolution_source is required for messages and comments")
+            if conversation_relation == "reply_to_owner" and not owner_context_text:
+                raise ValueError("owner_context_text is required when the other person replies to the owner")
         item = {
             "platform": platform,
             "item_type": item_type,
             "counterparty_key": str(raw.get("counterparty_key", "")).strip()[:300],
             "counterparty_display_name": counterparty,
-            "original_text": original_text,
+            "counterparty_text": counterparty_text,
+            "owner_context_text": owner_context_text,
+            "conversation_relation": conversation_relation,
+            "direction_verified": direction_verified,
+            "role_resolution_source": role_resolution_source,
+            "user_intent_text": user_intent_text,
             "platform_item_id": str(raw.get("platform_item_id", "")).strip()[:300],
             "source_url": str(raw.get("source_url", "")).strip()[:2000],
             "observed_at": str(raw.get("observed_at", "")).strip()[:100],
@@ -104,18 +139,37 @@ class PersonalWorkflow:
             item.update(
                 {
                     "assistant_decision": decision,
+                    "assistant_category": str(raw.get("assistant_category", "")).strip()[:100],
+                    "assistant_risk_level": str(raw.get("assistant_risk_level", "")).strip(),
                     "assistant_draft": str(raw.get("assistant_draft", "")).strip(),
                     "assistant_rationale": str(raw.get("assistant_rationale", "")).strip()[:1000],
                     "preview_payload": raw.get("preview_payload", {}),
                 }
             )
+            category = item["assistant_category"]
+            model_risk = item["assistant_risk_level"]
+            if bool(category) != bool(model_risk):
+                raise ValueError(
+                    "assistant_category and assistant_risk_level must be provided together"
+                )
+            if model_risk and model_risk not in RISK_LEVELS:
+                raise ValueError("assistant_risk_level must be no_risk, low, medium, or high")
         return item
 
     def _decide(self, observation: dict[str, Any]) -> dict[str, Any]:
-        text = observation["original_text"]
         item_type = observation["item_type"]
+        text = observation["user_intent_text"] if item_type == "post" else observation["counterparty_text"]
         sensitive_tags = self.core.sensitive_tags(text)
-        analysis = self.core.enforce_analysis_safety(text, self.core.classify_comment(text))
+        if observation.get("assistant_category"):
+            model_analysis = self.core.analysis_factory(
+                observation["assistant_category"],
+                observation["assistant_risk_level"],
+                observation.get("assistant_rationale", "") or "模型已完成初步分类。",
+                "按风险等级设置处理",
+            )
+        else:
+            model_analysis = self.core.classify_comment(text)
+        analysis = self.core.enforce_analysis_safety(text, model_analysis)
         decision = observation["assistant_decision"]
         rationale = observation.get("assistant_rationale", "")
         draft_text = ""
@@ -142,6 +196,12 @@ class PersonalWorkflow:
             state = "hard_blocked" if decision == "block" else "user_handling_required"
             final_decision = "record_and_escalate" if decision == "block" else "escalate_to_user"
             rationale = rationale or "ChatGPT marked this item for the user to handle."
+        elif item_type != "post" and self.risk_level_actions()[risk_level] == "record_only":
+            state = "record_only"
+            final_decision = "record_only"
+            rationale = (
+                f"User configured {risk_level} items as record-only; no reply draft was created."
+            )
         else:
             draft_text = observation["assistant_draft"].strip()
             hard_limit = 3000 if item_type == "post" else self.max_reply_chars
@@ -173,13 +233,19 @@ class PersonalWorkflow:
             "item_type": item_type,
             "counterparty_key": observation["counterparty_key"],
             "counterparty_display_name": observation["counterparty_display_name"],
-            "original_text": text,
+            "counterparty_text": observation["counterparty_text"],
+            "owner_context_text": observation["owner_context_text"],
+            "conversation_relation": observation["conversation_relation"],
+            "direction_verified": observation["direction_verified"],
+            "role_resolution_source": observation["role_resolution_source"],
+            "user_intent_text": observation["user_intent_text"],
             "platform_item_id": observation["platform_item_id"],
             "source_url": observation["source_url"],
             "observed_at": observation["observed_at"],
             "decision": final_decision,
             "state": state,
             "sensitive_tags": sensitive_tags,
+            "category": analysis.category,
             "risk_level": risk_level,
             "rationale": rationale,
             "voice_profile": self.voice_profile(),
@@ -195,7 +261,7 @@ class PersonalWorkflow:
             raise ValueError(f"Profile configuration not found: {self.profile_path}")
         raw = json.loads(self.profile_path.read_text(encoding="utf-8"))
         if not isinstance(raw, dict):
-            raise ValueError("config/profile.json must contain a JSON object")
+            raise ValueError("Personal profile must contain a JSON object")
         return raw
 
 
@@ -213,7 +279,9 @@ def content_fingerprint(item: dict[str, Any]) -> str:
             "item_type": item["item_type"],
             "counterparty_key": item.get("counterparty_key", ""),
             "counterparty_display_name": item.get("counterparty_display_name", ""),
-            "original_text": item["original_text"],
+            "counterparty_text": item.get("counterparty_text", ""),
+            "owner_context_text": item.get("owner_context_text", ""),
+            "conversation_relation": item.get("conversation_relation", ""),
             "source_url": item.get("source_url", ""),
         }
     encoded = json.dumps(source, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -225,14 +293,13 @@ def approval_fingerprint(item: dict[str, Any]) -> str:
         "work_item_id": item["work_item_id"],
         "platform": item["platform"],
         "item_type": item["item_type"],
+        "counterparty_text": item.get("counterparty_text", ""),
+        "owner_context_text": item.get("owner_context_text", ""),
+        "conversation_relation": item.get("conversation_relation", ""),
+        "direction_verified": item.get("direction_verified", False),
+        "user_intent_text": item.get("user_intent_text", ""),
         "draft_text": item["draft_text"],
         "preview_payload": item["preview_payload"],
     }
     encoded = json.dumps(source, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
-
-
-def _string_list(value: Any, limit: int, item_limit: int) -> list[str]:
-    if not isinstance(value, list):
-        raise ValueError("Voice profile list fields must be arrays")
-    return [str(item)[:item_limit] for item in value[:limit]]

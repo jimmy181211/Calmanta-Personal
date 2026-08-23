@@ -1,33 +1,34 @@
 # Calmanta Personal
 
-Calmanta Personal 是 Calmanta 正式版的本地伴侣，不是另一套重写。它直接复用相邻
-`Calmanta-Official/backend` 中的账号材料过滤、风险分类、敏感话题识别和草稿安全校验；新增的只有
-本地持久化、ChatGPT 工作流和审批记录。
+Calmanta Personal 是交给本地 ChatGPT/Codex 使用的个人伴侣。它通过相邻的独立
+`Calmanta-Core` 获得账号材料过滤、风险分类、敏感话题识别、口吻规则和草稿安全校验；Personal
+本身负责本地持久化、ChatGPT 工作流和审批记录。运行时不需要 Calmanta Official。
 
 ## 两个版本的分工
 
-- `Calmanta-Official`：正式云端产品，使用 PostgreSQL、S3 兼容对象存储和独立模型提供方。
+- `Calmanta-Core`：Personal 随包携带的最小规则包，不包含服务器、数据库、Android 或平台账号能力。
 - `Calmanta-Personal`：个人本地版，使用 ChatGPT/Codex 作为“模型和操作框架”，数据保存在本机。
 
 两个目录应并排放置：
 
 ```text
-Calmanta/
-├── Calmanta-Official/
+Calmanta-Personal-Package/
+├── Calmanta-Core/
 └── Calmanta-Personal/
 ```
 
-也可以用环境变量 `CALMANTA_CORE_DIR` 指向 `Calmanta-Official` 目录。
+也可以用环境变量 `CALMANTA_CORE_DIR` 指向 `Calmanta-Core` 目录。
 
 ## 本地数据放在哪里
 
 - 评论、私信、草稿、审批和事件：`data/calmanta-personal.db`（SQLite）
 - 图片或证据文件：`data/objects/`（按 SHA-256 去重）
 - 临时观察和决策文件：`staging/`
-- 口吻、平台和审批设置：`config/profile.json`
+- 公共示例设置：`config/profile.example.json`
+- 个人口吻、平台和审批设置：`config/profile.local.json`（仅本机，Git 忽略）
 
 `data/` 和 `staging/` 默认不会提交到 Git。Personal 不保存账号密码、Cookie、Token、浏览器
-会话或 Local Storage；`Calmanta-Official` 的过滤器会拒绝这些字段。
+会话或 Local Storage；`Calmanta-Core` 的过滤器会拒绝这些字段。
 
 ## 快速开始
 
@@ -49,8 +50,8 @@ python -m unittest discover -s tests -v
 1. 用户本人登录 Instagram 和小红书网页版。
 2. ChatGPT 只检查可见的新消息/评论，不接触认证材料。
 3. 先执行 `filter-new`，排除 SQLite 中已经见过的条目。
-4. ChatGPT 只对新条目判断“回复、不回复、交给本人或阻断”，并生成必要草稿。
-5. `ingest` 把结果保存到本机；只把值得回复的草稿和敏感事项展示给用户。
+4. ChatGPT 先判断风险等级和评论类别；用户只按风险等级选择自动起草或仅记录。
+5. `ingest` 把结果保存到本机；仅记录条目不生成草稿，威胁、隐私和敏感事项始终优先交给本人处理。
 6. `OK <ID>` 记录批准，但命令行本身绝不发送。
 7. 只有用户在当前交互任务中明确要求发送/发布，浏览器操作才可继续；确认平台显示成功后，
    才用 `complete <ID> --confirm SENT` 记账。
@@ -60,6 +61,9 @@ python -m unittest discover -s tests -v
 ## 常用命令
 
 ```powershell
+python -m calmanta_personal settings show
+python -m calmanta_personal settings preview --set low=generate_draft
+python -m calmanta_personal settings save --set low=generate_draft --confirm SAVE
 python -m calmanta_personal filter-new --input staging/observed.json --output staging/new.json
 python -m calmanta_personal ingest --input staging/decisions.json
 python -m calmanta_personal list --state draft_pending_review
@@ -68,6 +72,10 @@ python -m calmanta_personal reject <ID>
 python -m calmanta_personal complete <ID> --confirm SENT
 python -m calmanta_personal put-object <文件路径>
 ```
+
+在 ChatGPT/Codex 中说“打开设置”即可查看四个风险等级的当前处理方式。用户提出修改后，Personal
+会先显示未保存预览；只有用户明确说“保存设置”才会写入。每个等级只支持“生成草稿”和“仅记录”，
+设置只影响之后新处理的评论，强制安全规则始终优先。
 
 ## 边界
 
