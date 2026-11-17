@@ -15,8 +15,9 @@
     "no_risk": "record_only",
     "low": "record_only",
     "medium": "generate_draft",
-    "high": "generate_draft"
+    "high": "record_only"
   },
+  "reply_worthiness_threshold": 75,
   "voice_profile": {
     "custom_templates": []
   }

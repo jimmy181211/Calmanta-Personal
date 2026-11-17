@@ -47,10 +47,12 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
         settings = ProfileSettings(profile_path)
         if args.settings_command == "show":
             actions = settings.risk_level_actions()
+            threshold = settings.reply_worthiness_threshold()
             templates = settings.voice_templates()
             return {
-                "settings_panel": format_settings_panel(actions, templates),
+                "settings_panel": format_settings_panel(actions, templates, threshold=threshold),
                 "risk_level_actions": actions,
+                "reply_worthiness_threshold": threshold,
                 "voice_templates": templates,
                 "saved": True,
             }
@@ -65,7 +67,11 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
                 return {
                     "deleted": True,
                     "voice_templates": templates,
-                    "settings_panel": format_settings_panel(actions, templates),
+                    "settings_panel": format_settings_panel(
+                        actions,
+                        templates,
+                        threshold=settings.reply_worthiness_threshold(),
+                    ),
                 }
             if args.template_command == "bind":
                 template = settings.add_voice_template_bindings(
@@ -128,22 +134,32 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             templates = settings.voice_templates()
             return {
                 "voice_template": saved,
-                "settings_panel": format_settings_panel(actions, templates),
+                "settings_panel": format_settings_panel(
+                    actions,
+                    templates,
+                    threshold=settings.reply_worthiness_threshold(),
+                ),
                 "saved": True,
             }
-        changes = parse_risk_changes(args.set_values)
+        changes = parse_risk_changes(args.set_values) if args.set_values else {}
         if args.settings_command == "preview":
-            result = settings.preview_risk_level_actions(changes)
+            result = settings.preview_draft_settings(changes, args.threshold)
             return {
                 **result,
-                "settings_panel": format_settings_panel(result["proposed"], preview=True),
+                "settings_panel": format_settings_panel(
+                    result["proposed"],
+                    threshold=result["proposed_threshold"],
+                    preview=True,
+                ),
                 "confirmation_required": "SAVE",
             }
         if args.settings_command == "save":
-            result = settings.save_risk_level_actions(changes, args.confirm)
+            result = settings.save_draft_settings(changes, args.threshold, args.confirm)
             return {
                 **result,
-                "settings_panel": format_settings_panel(result["proposed"]),
+                "settings_panel": format_settings_panel(
+                    result["proposed"], threshold=result["proposed_threshold"]
+                ),
             }
         raise ValueError(f"Unknown settings command: {args.settings_command}")
 
@@ -254,9 +270,10 @@ def _parser() -> argparse.ArgumentParser:
         "--set",
         dest="set_values",
         action="append",
-        required=True,
+        required=False,
         metavar="LEVEL=ACTION",
     )
+    preview_settings.add_argument("--threshold", type=int)
     save_settings = settings_commands.add_parser(
         "save",
         help="Save validated risk-level changes",
@@ -265,9 +282,10 @@ def _parser() -> argparse.ArgumentParser:
         "--set",
         dest="set_values",
         action="append",
-        required=True,
+        required=False,
         metavar="LEVEL=ACTION",
     )
+    save_settings.add_argument("--threshold", type=int)
     save_settings.add_argument("--confirm", required=True)
 
     template_parser = settings_commands.add_parser(
@@ -388,6 +406,8 @@ def _review_card(item: dict[str, Any]) -> dict[str, Any]:
         "decision": item["decision"],
         "sensitive_tags": item["sensitive_tags"],
         "rationale": item["rationale"],
+        "reply_worthiness_score": item.get("reply_worthiness_score", 0),
+        "reply_worthiness_reason": item.get("reply_worthiness_reason", ""),
     }
 
 
@@ -414,6 +434,7 @@ def _format_review_card(item: dict[str, Any]) -> str:
         f"对方：{item.get('counterparty_display_name', '')}",
         f"对方发给我的内容（原消息）：{item.get('counterparty_text', '')}",
         f"风险等级：{_risk_level_label(item.get('risk_level', ''))} / 评论类别：{item.get('category', '未分类')}",
+        f"回复价值：{item.get('reply_worthiness_score', 0)} / 100 — {item.get('reply_worthiness_reason', '')}",
         f"建议回复原因：{item.get('rationale', '')}",
         "请选择：编辑回复 / 同意并发送 / 拒绝且不回复 / 拒绝并重新生成",
         "",

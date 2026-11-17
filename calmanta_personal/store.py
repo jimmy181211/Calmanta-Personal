@@ -30,6 +30,11 @@ CREATE TABLE IF NOT EXISTS work_items (
     category TEXT NOT NULL DEFAULT '未分类',
     risk_level TEXT NOT NULL DEFAULT 'low',
     rationale TEXT NOT NULL DEFAULT '',
+    reply_worthiness_score INTEGER NOT NULL DEFAULT 0 CHECK (
+        reply_worthiness_score BETWEEN 0 AND 100
+    ),
+    reply_worthiness_reason TEXT NOT NULL DEFAULT '',
+    reply_worthiness_signals_json TEXT NOT NULL DEFAULT '[]',
     voice_profile_json TEXT NOT NULL DEFAULT '{}',
     draft_text TEXT NOT NULL DEFAULT '',
     preview_payload_json TEXT NOT NULL DEFAULT '{}',
@@ -70,6 +75,7 @@ CREATE TABLE IF NOT EXISTS objects (
 
 JSON_FIELDS = {
     "sensitive_tags_json": "sensitive_tags",
+    "reply_worthiness_signals_json": "reply_worthiness_signals",
     "voice_profile_json": "voice_profile",
     "preview_payload_json": "preview_payload",
 }
@@ -116,6 +122,9 @@ class LocalStore:
             "category",
             "risk_level",
             "rationale",
+            "reply_worthiness_score",
+            "reply_worthiness_reason",
+            "reply_worthiness_signals_json",
             "voice_profile_json",
             "draft_text",
             "preview_payload_json",
@@ -125,6 +134,9 @@ class LocalStore:
         ]
         record = dict(item)
         record["sensitive_tags_json"] = _json(record.pop("sensitive_tags", []))
+        record["reply_worthiness_signals_json"] = _json(
+            record.pop("reply_worthiness_signals", [])
+        )
         record["voice_profile_json"] = _json(record.pop("voice_profile", {}))
         record["preview_payload_json"] = _json(record.pop("preview_payload", {}))
         values = [record.get(column, "") for column in columns]
@@ -205,6 +217,7 @@ class LocalStore:
                 "draft_pending_review",
                 "preview_pending_review",
                 "no_reply_recommended",
+                "record_only",
                 "user_handling_required",
             }:
                 raise ValueError("This work item cannot be edited")
@@ -391,6 +404,9 @@ class LocalStore:
             "role_resolution_source": "TEXT NOT NULL DEFAULT 'legacy_unverified'",
             "user_intent_text": "TEXT NOT NULL DEFAULT ''",
             "category": "TEXT NOT NULL DEFAULT '未分类'",
+            "reply_worthiness_score": "INTEGER NOT NULL DEFAULT 0",
+            "reply_worthiness_reason": "TEXT NOT NULL DEFAULT ''",
+            "reply_worthiness_signals_json": "TEXT NOT NULL DEFAULT '[]'",
         }
         for column, definition in additions.items():
             if column not in columns:

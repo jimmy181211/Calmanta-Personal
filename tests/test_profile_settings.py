@@ -72,7 +72,7 @@ class ProfileSettingsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "record_only or generate_draft"):
             self.settings.preview_risk_level_actions({"low": "silent_record"})
         panel = format_settings_panel(self.settings.risk_level_actions())
-        self.assertIn("可选处理方式：生成草稿 / 仅记录", panel)
+        self.assertIn("风险策略和回复价值门槛都通过", panel)
         self.assertNotIn("静默记录", panel)
 
     def test_change_parser_rejects_unknown_and_duplicate_levels(self) -> None:
@@ -88,9 +88,22 @@ class ProfileSettingsTests(unittest.TestCase):
         payload = json.loads(output.getvalue())
         self.assertEqual(0, exit_code)
         self.assertTrue(payload["ok"])
-        self.assertIn("Calmanta Personal 风险处理设置", payload["settings_panel"])
+        self.assertIn("Calmanta Personal 草稿设置", payload["settings_panel"])
+        self.assertEqual(75, payload["reply_worthiness_threshold"])
         self.assertIn("我的口吻模板：0 个", payload["settings_panel"])
         self.assertEqual("record_only", payload["risk_level_actions"]["no_risk"])
+
+    def test_reply_worthiness_threshold_preview_and_save(self) -> None:
+        before = self.profile_path.read_text(encoding="utf-8")
+        preview = self.settings.preview_draft_settings({}, 82)
+        self.assertEqual(82, preview["proposed_threshold"])
+        self.assertEqual(before, self.profile_path.read_text(encoding="utf-8"))
+
+        saved = self.settings.save_draft_settings({}, 82, "SAVE")
+        self.assertTrue(saved["saved"])
+        self.assertEqual(82, self.settings.reply_worthiness_threshold())
+        with self.assertRaisesRegex(ValueError, "integer from 0 to 100"):
+            self.settings.preview_draft_settings({}, 101)
 
     def test_saved_voice_template_appears_in_settings_panel(self) -> None:
         template = {

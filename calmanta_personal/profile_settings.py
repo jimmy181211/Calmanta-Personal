@@ -12,8 +12,9 @@ DEFAULT_RISK_LEVEL_ACTIONS = {
     "no_risk": "record_only",
     "low": "record_only",
     "medium": "generate_draft",
-    "high": "generate_draft",
+    "high": "record_only",
 }
+DEFAULT_REPLY_WORTHINESS_THRESHOLD = 75
 RISK_LABELS = {
     "no_risk": "无风险",
     "low": "低风险",
@@ -68,6 +69,14 @@ class ProfileSettings:
         profile = self._profile()
         return _validated_risk_actions(profile.get("risk_level_actions", {}))
 
+    def reply_worthiness_threshold(self) -> int:
+        return _validated_reply_worthiness_threshold(
+            self._profile().get(
+                "reply_worthiness_threshold",
+                DEFAULT_REPLY_WORTHINESS_THRESHOLD,
+            )
+        )
+
     def preview_risk_level_actions(self, changes: dict[str, str]) -> dict[str, Any]:
         validated_changes = _validated_changes(changes)
         current = self.risk_level_actions()
@@ -90,6 +99,59 @@ class ProfileSettings:
             "changes": changed,
             "saved": False,
         }
+
+    def preview_draft_settings(
+        self,
+        changes: dict[str, str],
+        threshold: int | None,
+    ) -> dict[str, Any]:
+        current_actions = self.risk_level_actions()
+        proposed_actions = (
+            {**current_actions, **_validated_changes(changes)} if changes else current_actions
+        )
+        current_threshold = self.reply_worthiness_threshold()
+        proposed_threshold = (
+            current_threshold
+            if threshold is None
+            else _validated_reply_worthiness_threshold(threshold)
+        )
+        if not changes and threshold is None:
+            raise ValueError("At least one draft setting change is required")
+        return {
+            "current": current_actions,
+            "proposed": proposed_actions,
+            "changes": [
+                {
+                    "risk_level": level,
+                    "risk_label": RISK_LABELS[level],
+                    "from": current_actions[level],
+                    "from_label": ACTION_LABELS[current_actions[level]],
+                    "to": proposed_actions[level],
+                    "to_label": ACTION_LABELS[proposed_actions[level]],
+                }
+                for level in RISK_LEVELS
+                if current_actions[level] != proposed_actions[level]
+            ],
+            "current_threshold": current_threshold,
+            "proposed_threshold": proposed_threshold,
+            "threshold_changed": current_threshold != proposed_threshold,
+            "saved": False,
+        }
+
+    def save_draft_settings(
+        self,
+        changes: dict[str, str],
+        threshold: int | None,
+        confirmation: str,
+    ) -> dict[str, Any]:
+        if confirmation != "SAVE":
+            raise ValueError("Exact confirmation SAVE is required to change settings")
+        preview = self.preview_draft_settings(changes, threshold)
+        profile = self._profile()
+        profile["risk_level_actions"] = preview["proposed"]
+        profile["reply_worthiness_threshold"] = preview["proposed_threshold"]
+        self._atomic_write(profile)
+        return {**preview, "saved": True}
 
     def save_risk_level_actions(
         self,
@@ -278,21 +340,23 @@ def format_settings_panel(
     actions: dict[str, str],
     templates: list[dict[str, Any]] | None = None,
     *,
+    threshold: int = DEFAULT_REPLY_WORTHINESS_THRESHOLD,
     preview: bool = False,
 ) -> str:
     validated = _validated_risk_actions(actions)
-    title = "Calmanta Personal 风险处理设置"
+    threshold = _validated_reply_worthiness_threshold(threshold)
+    title = "Calmanta Personal 草稿设置"
     if preview:
         title += "（未保存预览）"
-    lines = [title, ""]
+    lines = [title, "", f"回复价值门槛：{threshold} / 100", ""]
     lines.extend(
         f"{RISK_LABELS[level]}：{ACTION_LABELS[validated[level]]}" for level in RISK_LEVELS
     )
     lines.extend(
         (
             "",
-            "可选处理方式：生成草稿 / 仅记录",
-            "强制安全规则不会被这些设置覆盖。",
+            "风险策略和回复价值门槛都通过，才会生成草稿。",
+            "威胁、隐私和敏感决定不会生成草稿。",
         )
     )
     templates = templates or []
@@ -434,3 +498,9 @@ def _validated_risk_actions(supplied: Any) -> dict[str, str]:
                 "record_only or generate_draft"
             )
     return {level: str(actions[level]) for level in RISK_LEVELS}
+
+
+def _validated_reply_worthiness_threshold(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0 or value > 100:
+        raise ValueError("reply_worthiness_threshold must be an integer from 0 to 100")
+    return value

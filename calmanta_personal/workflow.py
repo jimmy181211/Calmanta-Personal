@@ -13,6 +13,16 @@ from .store import LocalStore
 ALLOWED_PLATFORMS = {"instagram", "xiaohongshu"}
 ALLOWED_ITEM_TYPES = {"message", "comment", "post"}
 ALLOWED_AI_DECISIONS = {"draft", "no_reply", "escalate", "block"}
+ALLOWED_REPLY_WORTHINESS_SIGNALS = {
+    "clear_question",
+    "factual_correction",
+    "constructive_disagreement",
+    "meaningful_engagement",
+    "simple_acknowledgement",
+    "emoji_only",
+    "spam",
+    "unclear",
+}
 ALLOWED_CONVERSATION_RELATIONS = {
     "direct_message",
     "top_level_comment",
@@ -67,6 +77,9 @@ class PersonalWorkflow:
 
     def risk_level_actions(self) -> dict[str, str]:
         return ProfileSettings(self.profile_path).risk_level_actions()
+
+    def reply_worthiness_threshold(self) -> int:
+        return ProfileSettings(self.profile_path).reply_worthiness_threshold()
 
     def _normalize(self, raw: dict[str, Any], include_decision: bool) -> dict[str, Any]:
         if not isinstance(raw, dict):
@@ -146,6 +159,30 @@ class PersonalWorkflow:
                     "preview_payload": raw.get("preview_payload", {}),
                 }
             )
+            score = raw.get("assistant_reply_worthiness_score")
+            worthiness_valid = True
+            if score is not None and (
+                isinstance(score, bool)
+                or not isinstance(score, int)
+                or score < 0
+                or score > 100
+            ):
+                score = None
+                worthiness_valid = False
+            signals = raw.get("assistant_reply_worthiness_signals", [])
+            if not isinstance(signals, list):
+                signals = []
+                worthiness_valid = False
+            clean_signals = [str(value).strip() for value in signals[:3]]
+            if any(value not in ALLOWED_REPLY_WORTHINESS_SIGNALS for value in clean_signals):
+                clean_signals = []
+                worthiness_valid = False
+            item["assistant_reply_worthiness_score"] = score
+            item["assistant_reply_worthiness_reason"] = str(
+                raw.get("assistant_reply_worthiness_reason", "")
+            ).strip()[:300]
+            item["assistant_reply_worthiness_signals"] = clean_signals
+            item["assistant_reply_worthiness_valid"] = worthiness_valid
             category = item["assistant_category"]
             model_risk = item["assistant_risk_level"]
             if bool(category) != bool(model_risk):
@@ -174,6 +211,9 @@ class PersonalWorkflow:
         rationale = observation.get("assistant_rationale", "")
         draft_text = ""
         risk_level = str(analysis.risk_level)
+        reply_worthiness_score = 0
+        reply_worthiness_reason = "此内容不需要进行回复价值判断。"
+        reply_worthiness_signals: list[str] = []
 
         if "threat" in analysis.safety_flags or "privacy" in analysis.safety_flags:
             state = "hard_blocked"
@@ -186,12 +226,6 @@ class PersonalWorkflow:
             rationale = (
                 "Sensitive topic detected: complaint, refund, price, collaboration, or contract."
             )
-        elif item_type != "post" and (
-            decision == "no_reply" or self.core.no_reply_recommended(text)
-        ):
-            state = "no_reply_recommended"
-            final_decision = "no_reply_recommended"
-            rationale = rationale or "No useful reply is needed."
         elif decision in {"escalate", "block"}:
             state = "hard_blocked" if decision == "block" else "user_handling_required"
             final_decision = "record_and_escalate" if decision == "block" else "escalate_to_user"
@@ -202,6 +236,51 @@ class PersonalWorkflow:
             rationale = (
                 f"User configured {risk_level} items as record-only; no reply draft was created."
             )
+        elif item_type != "post":
+            worthiness_available = True
+            fixed = _fixed_reply_worthiness(text, self.core.no_reply_recommended(text))
+            if fixed is not None:
+                reply_worthiness_score, reply_worthiness_reason, reply_worthiness_signals = fixed
+            else:
+                supplied_score = observation.get("assistant_reply_worthiness_score")
+                supplied_reason = observation.get("assistant_reply_worthiness_reason", "")
+                if (
+                    not observation.get("assistant_reply_worthiness_valid", True)
+                    or supplied_score is None
+                    or not supplied_reason
+                ):
+                    worthiness_available = False
+                    state = "record_only"
+                    final_decision = "worthiness_unavailable"
+                    reply_worthiness_reason = (
+                        "无法确认回复价值，已保守地只保存记录。"
+                    )
+                    reply_worthiness_signals = ["unclear"]
+                    rationale = reply_worthiness_reason
+                else:
+                    reply_worthiness_score = int(supplied_score)
+                    reply_worthiness_reason = str(supplied_reason)
+                    reply_worthiness_signals = list(
+                        observation.get("assistant_reply_worthiness_signals", [])
+                    )
+            if worthiness_available:
+                if (
+                    decision == "no_reply"
+                    or reply_worthiness_score < self.reply_worthiness_threshold()
+                ):
+                    state = "record_only"
+                    final_decision = "no_reply_recommended"
+                    rationale = reply_worthiness_reason
+                else:
+                    draft_text = observation["assistant_draft"].strip()
+                    problems = self.core.validate_reply(draft_text, text, self.max_reply_chars)
+                    if problems:
+                        raise ValueError(
+                            "Draft failed Calmanta safety checks: " + ", ".join(problems)
+                        )
+                    state = "draft_pending_review"
+                    final_decision = "draft_for_review"
+                    rationale = rationale or "草稿已生成，等待你确认。"
         else:
             draft_text = observation["assistant_draft"].strip()
             hard_limit = 3000 if item_type == "post" else self.max_reply_chars
@@ -248,6 +327,9 @@ class PersonalWorkflow:
             "category": analysis.category,
             "risk_level": risk_level,
             "rationale": rationale,
+            "reply_worthiness_score": reply_worthiness_score,
+            "reply_worthiness_reason": reply_worthiness_reason,
+            "reply_worthiness_signals": reply_worthiness_signals,
             "voice_profile": self.voice_profile(),
             "draft_text": draft_text,
             "preview_payload": preview_payload,
@@ -303,3 +385,21 @@ def approval_fingerprint(item: dict[str, Any]) -> str:
     }
     encoded = json.dumps(source, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _fixed_reply_worthiness(
+    text: str,
+    no_reply_recommended: bool,
+) -> tuple[int, str, list[str]] | None:
+    cleaned = text.strip()
+    if not no_reply_recommended:
+        return None
+    if any(
+        token in cleaned.lower()
+        for token in ("加微信", "刷粉", "代运营", "兼职日结", "点击链接", "免费领取", "investment opportunity")
+    ):
+        return 0, "内容像垃圾信息，不建议回复。", ["spam"]
+    signal = "emoji_only" if cleaned and not any(
+        character.isalnum() for character in cleaned
+    ) else "simple_acknowledgement"
+    return 0, "只是简单确认或表情，不需要回复。", [signal]

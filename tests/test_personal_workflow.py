@@ -93,6 +93,11 @@ class PersonalWorkflowTests(unittest.TestCase):
                     "role_resolution_source": "visible_thread_roles",
                     "platform_item_id": "dm-201",
                     "assistant_decision": "draft",
+                    "assistant_category": "普通质疑或分歧",
+                    "assistant_risk_level": "medium",
+                    "assistant_reply_worthiness_score": 86,
+                    "assistant_reply_worthiness_reason": "需要明确设定交流边界。",
+                    "assistant_reply_worthiness_signals": ["meaningful_engagement"],
                     "assistant_draft": "请保持理性交流；如果有具体问题，可以基于事实说明。",
                 }
             ]
@@ -108,6 +113,46 @@ class PersonalWorkflowTests(unittest.TestCase):
         self.assertNotIn("sent", approved)
         completed = self.store.complete(item["work_item_id"], self.core.utc_now())
         self.assertEqual("completed", completed["state"])
+
+    def test_reply_worthiness_threshold_blocks_74_and_allows_75(self) -> None:
+        base = {
+            "platform": "instagram",
+            "item_type": "message",
+            "counterparty_display_name": "reader",
+            "conversation_relation": "direct_message",
+            "direction_verified": True,
+            "role_resolution_source": "visible_thread_roles",
+            "assistant_decision": "draft",
+            "assistant_category": "普通质疑或分歧",
+            "assistant_risk_level": "medium",
+            "assistant_draft": "可以，我们把具体依据说清楚。",
+            "assistant_reply_worthiness_reason": "有具体分歧，回复能推进交流。",
+            "assistant_reply_worthiness_signals": ["constructive_disagreement"],
+        }
+        blocked = self.workflow.ingest([{**base, "platform_item_id": "score-74", "counterparty_text": "这个结论我不认同。", "assistant_reply_worthiness_score": 74}])["created"][0]
+        allowed = self.workflow.ingest([{**base, "platform_item_id": "score-75", "counterparty_text": "这个结论我不认同，依据是什么？", "assistant_reply_worthiness_score": 75}])["created"][0]
+        self.assertEqual("record_only", blocked["state"])
+        self.assertEqual("draft_pending_review", allowed["state"])
+
+    def test_malformed_reply_worthiness_records_only(self) -> None:
+        item = self.workflow.ingest([{
+            "platform": "instagram",
+            "item_type": "message",
+            "counterparty_display_name": "reader",
+            "counterparty_text": "这个结论我不认同，能解释一下吗？",
+            "conversation_relation": "direct_message",
+            "direction_verified": True,
+            "role_resolution_source": "visible_thread_roles",
+            "platform_item_id": "bad-score",
+            "assistant_decision": "draft",
+            "assistant_category": "普通质疑或分歧",
+            "assistant_risk_level": "medium",
+            "assistant_reply_worthiness_score": 101,
+            "assistant_reply_worthiness_reason": "格式错误的分数。",
+            "assistant_draft": "可以，我们把依据说清楚。",
+        }])["created"][0]
+        self.assertEqual("record_only", item["state"])
+        self.assertEqual("worthiness_unavailable", item["decision"])
 
     def test_auth_material_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
