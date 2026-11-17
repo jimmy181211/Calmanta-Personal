@@ -14,7 +14,8 @@ $packageName = "Calmanta-Personal-Package-$Version"
 $stagingRoot = Join-Path $releaseRoot $packageName
 $zipPath = Join-Path $releaseRoot "$packageName.zip"
 
-if (-not (Test-Path -LiteralPath (Join-Path $coreRoot "backend\inbox_rules.py"))) {
+if (-not (Test-Path -LiteralPath (Join-Path $coreRoot `
+    "backend\inbox_rules.py"))) {
     throw "Calmanta-Core is missing or incomplete: $coreRoot"
 }
 
@@ -72,18 +73,25 @@ function Copy-PackageTree {
     }
 }
 
-Copy-PackageTree -Source $personalRoot -Destination (Join-Path $stagingRoot "Calmanta-Personal")
-Copy-PackageTree -Source $coreRoot -Destination (Join-Path $stagingRoot "Calmanta-Core")
-Copy-Item -LiteralPath (Join-Path $packagingRoot "START_HERE.md") -Destination $stagingRoot
-Copy-Item -LiteralPath (Join-Path $packagingRoot "PACKAGE_MANIFEST.json") -Destination $stagingRoot
+Copy-PackageTree -Source $personalRoot -Destination (Join-Path $stagingRoot `
+    "Calmanta-Personal")
+Copy-PackageTree -Source $coreRoot -Destination (Join-Path $stagingRoot `
+    "Calmanta-Core")
+Copy-Item -LiteralPath (Join-Path $packagingRoot "START_HERE.md") `
+    -Destination $stagingRoot
+Copy-Item -LiteralPath (Join-Path $packagingRoot "PACKAGE_MANIFEST.json") `
+    -Destination $stagingRoot
 
-$forbidden = Get-ChildItem -LiteralPath $stagingRoot -Recurse -Force | Where-Object {
+$forbidden = Get-ChildItem -LiteralPath $stagingRoot -Recurse -Force | `
+    Where-Object {
     $_.Name -in @(".git", ".venv", "data", "staging", "profile.local.json") -or
     $_.Extension -in @(".db", ".sqlite", ".sqlite3", ".pyc", ".pyo")
 }
 if ($forbidden) {
-    throw "Private or generated files entered the package: $($forbidden.FullName -join ', ')"
+    throw ("Private or generated files entered the package: " +
+        "$($forbidden.FullName -join ', ')")
 }
 
-Compress-Archive -Path (Join-Path $stagingRoot "*") -DestinationPath $zipPath -CompressionLevel Optimal
+Compress-Archive -Path (Join-Path $stagingRoot "*") -DestinationPath $zipPath `
+    -CompressionLevel Optimal
 Write-Output $zipPath

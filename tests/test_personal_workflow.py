@@ -97,7 +97,9 @@ class PersonalWorkflowTests(unittest.TestCase):
                     "assistant_risk_level": "medium",
                     "assistant_reply_worthiness_score": 86,
                     "assistant_reply_worthiness_reason": "需要明确设定交流边界。",
-                    "assistant_reply_worthiness_signals": ["meaningful_engagement"],
+                    "assistant_reply_worthiness_signals": [
+                        "meaningful_engagement"
+                    ],
                     "assistant_draft": "请保持理性交流；如果有具体问题，可以基于事实说明。",
                 }
             ]
@@ -111,7 +113,9 @@ class PersonalWorkflowTests(unittest.TestCase):
         )
         self.assertEqual("approved", approved["state"])
         self.assertNotIn("sent", approved)
-        completed = self.store.complete(item["work_item_id"], self.core.utc_now())
+        completed = self.store.complete(
+            item["work_item_id"], self.core.utc_now()
+        )
         self.assertEqual("completed", completed["state"])
 
     def test_reply_worthiness_threshold_blocks_74_and_allows_75(self) -> None:
@@ -127,30 +131,54 @@ class PersonalWorkflowTests(unittest.TestCase):
             "assistant_risk_level": "medium",
             "assistant_draft": "可以，我们把具体依据说清楚。",
             "assistant_reply_worthiness_reason": "有具体分歧，回复能推进交流。",
-            "assistant_reply_worthiness_signals": ["constructive_disagreement"],
+            ("assistant_reply_worthiness_signals"): [
+                ("constructive_disagreement")
+            ],
         }
-        blocked = self.workflow.ingest([{**base, "platform_item_id": "score-74", "counterparty_text": "这个结论我不认同。", "assistant_reply_worthiness_score": 74}])["created"][0]
-        allowed = self.workflow.ingest([{**base, "platform_item_id": "score-75", "counterparty_text": "这个结论我不认同，依据是什么？", "assistant_reply_worthiness_score": 75}])["created"][0]
+        blocked = self.workflow.ingest(
+            [
+                {
+                    **base,
+                    "platform_item_id": "score-74",
+                    "counterparty_text": "这个结论我不认同。",
+                    "assistant_reply_worthiness_score": 74,
+                }
+            ]
+        )["created"][0]
+        allowed = self.workflow.ingest(
+            [
+                {
+                    **base,
+                    "platform_item_id": "score-75",
+                    "counterparty_text": "这个结论我不认同，依据是什么？",
+                    "assistant_reply_worthiness_score": 75,
+                }
+            ]
+        )["created"][0]
         self.assertEqual("record_only", blocked["state"])
         self.assertEqual("draft_pending_review", allowed["state"])
 
     def test_malformed_reply_worthiness_records_only(self) -> None:
-        item = self.workflow.ingest([{
-            "platform": "instagram",
-            "item_type": "message",
-            "counterparty_display_name": "reader",
-            "counterparty_text": "这个结论我不认同，能解释一下吗？",
-            "conversation_relation": "direct_message",
-            "direction_verified": True,
-            "role_resolution_source": "visible_thread_roles",
-            "platform_item_id": "bad-score",
-            "assistant_decision": "draft",
-            "assistant_category": "普通质疑或分歧",
-            "assistant_risk_level": "medium",
-            "assistant_reply_worthiness_score": 101,
-            "assistant_reply_worthiness_reason": "格式错误的分数。",
-            "assistant_draft": "可以，我们把依据说清楚。",
-        }])["created"][0]
+        item = self.workflow.ingest(
+            [
+                {
+                    "platform": "instagram",
+                    "item_type": "message",
+                    "counterparty_display_name": "reader",
+                    "counterparty_text": "这个结论我不认同，能解释一下吗？",
+                    "conversation_relation": "direct_message",
+                    "direction_verified": True,
+                    "role_resolution_source": "visible_thread_roles",
+                    "platform_item_id": "bad-score",
+                    "assistant_decision": "draft",
+                    "assistant_category": "普通质疑或分歧",
+                    "assistant_risk_level": "medium",
+                    "assistant_reply_worthiness_score": 101,
+                    "assistant_reply_worthiness_reason": "格式错误的分数。",
+                    "assistant_draft": "可以，我们把依据说清楚。",
+                }
+            ]
+        )["created"][0]
         self.assertEqual("record_only", item["state"])
         self.assertEqual("worthiness_unavailable", item["decision"])
 
@@ -178,7 +206,9 @@ class PersonalWorkflowTests(unittest.TestCase):
         first = objects.put_file(source, self.core.utc_now())
         second = objects.put_file(source, self.core.utc_now())
         self.assertEqual(first["object_key"], second["object_key"])
-        self.assertTrue((self.root / "data" / "objects" / first["object_key"]).is_file())
+        self.assertTrue(
+            (self.root / "data" / "objects" / first["object_key"]).is_file()
+        )
 
     def test_editing_post_keeps_preview_caption_in_sync(self) -> None:
         result = self.workflow.ingest(
@@ -201,9 +231,13 @@ class PersonalWorkflowTests(unittest.TestCase):
             "user_authored_for_review",
             self.core.utc_now(),
         )
-        self.assertEqual(updated["draft_text"], updated["preview_payload"]["caption"])
+        self.assertEqual(
+            updated["draft_text"], updated["preview_payload"]["caption"]
+        )
 
-    def test_reply_to_owner_keeps_owner_content_out_of_counterparty_text(self) -> None:
+    def test_reply_to_owner_keeps_owner_content_out_of_counterparty_text(
+        self,
+    ) -> None:
         result = self.workflow.ingest(
             [
                 {
@@ -222,7 +256,9 @@ class PersonalWorkflowTests(unittest.TestCase):
             ]
         )
         item = result["created"][0]
-        self.assertEqual(item["counterparty_text"], "北京长大的孩子，不是海外华人。")
+        self.assertEqual(
+            item["counterparty_text"], "北京长大的孩子，不是海外华人。"
+        )
         self.assertEqual(
             item["owner_context_text"],
             "只能说赛道不同吧，你要麻省的来高考他也不会啊，又看不懂中文。",
@@ -230,7 +266,9 @@ class PersonalWorkflowTests(unittest.TestCase):
         self.assertEqual(item["conversation_relation"], "reply_to_owner")
         self.assertTrue(item["direction_verified"])
 
-    def test_review_card_always_places_draft_before_message_metadata(self) -> None:
+    def test_review_card_always_places_draft_before_message_metadata(
+        self,
+    ) -> None:
         card = _format_review_card(
             {
                 "work_item_id": "review-order-1",
@@ -246,16 +284,27 @@ class PersonalWorkflowTests(unittest.TestCase):
                 "rationale": "对方在纠正事实。",
             }
         )
-        self.assertTrue(card.startswith("拟回复（尚未发送）：明白了，谢谢你指出。"))
-        self.assertLess(card.index("平台："), card.index("对方发给我的内容（原消息）："))
-        self.assertLess(card.index("对方发给我的内容（原消息）："), card.index("风险等级："))
+        self.assertTrue(
+            card.startswith("拟回复（尚未发送）：明白了，谢谢你指出。")
+        )
+        self.assertLess(
+            card.index("平台："), card.index("对方发给我的内容（原消息）：")
+        )
+        self.assertLess(
+            card.index("对方发给我的内容（原消息）："), card.index("风险等级：")
+        )
         self.assertLess(card.index("风险等级："), card.index("建议回复原因："))
         self.assertIn("风险等级：低风险 / 评论类别：事实纠正", card)
         self.assertLess(card.index("建议回复原因："), card.index("请选择："))
         self.assertLess(card.index("请选择："), card.index("<details>"))
-        self.assertIn("编辑回复 / 同意并发送 / 拒绝且不回复 / 拒绝并重新生成", card)
+        self.assertIn(
+            "编辑回复 / 同意并发送 / 拒绝且不回复 / 拒绝并重新生成", card
+        )
         self.assertLess(card.index("<details>"), card.index("对话关系："))
-        self.assertLess(card.index("对话关系："), card.index("我的被回复内容（仅供上下文）："))
+        self.assertLess(
+            card.index("对话关系："),
+            card.index("我的被回复内容（仅供上下文）："),
+        )
 
     def test_personal_uses_shared_human_voice_guide(self) -> None:
         profile = self.workflow.voice_profile()
@@ -263,59 +312,85 @@ class PersonalWorkflowTests(unittest.TestCase):
         self.assertIn("感谢您的宝贵意见", profile["avoid_phrases"])
         scenario_ids = {scenario["id"] for scenario in profile["scenarios"]}
         self.assertIn("factual_correction", scenario_ids)
-        self.assertIn("对，北京长大的确实不算海外华人，我前面说岔了。", profile["examples"])
+        self.assertIn(
+            "对，北京长大的确实不算海外华人，我前面说岔了。",
+            profile["examples"],
+        )
 
     def test_inbound_items_require_verified_roles(self) -> None:
         with self.assertRaisesRegex(ValueError, "counterparty_text"):
             self.workflow.filter_new(
-                [{
-                    "platform": "instagram",
-                    "item_type": "message",
-                    "counterparty_display_name": "reader",
-                    "conversation_relation": "direct_message",
-                    "direction_verified": True,
-                    "role_resolution_source": "visible_thread_roles",
-                }]
+                [
+                    {
+                        "platform": "instagram",
+                        "item_type": "message",
+                        "counterparty_display_name": "reader",
+                        "conversation_relation": "direct_message",
+                        "direction_verified": True,
+                        "role_resolution_source": "visible_thread_roles",
+                    }
+                ]
             )
 
-    def test_legacy_database_rows_remain_unverified_after_role_migration(self) -> None:
+    def test_legacy_database_rows_remain_unverified_after_role_migration(
+        self,
+    ) -> None:
         legacy_path = self.root / "data" / "legacy.db"
         with sqlite3.connect(legacy_path) as connection:
             connection.executescript(
-                """
-                CREATE TABLE work_items (
-                    work_item_id TEXT PRIMARY KEY,
-                    fingerprint TEXT NOT NULL UNIQUE,
-                    platform TEXT NOT NULL,
-                    item_type TEXT NOT NULL,
-                    counterparty_key TEXT NOT NULL DEFAULT '',
-                    counterparty_display_name TEXT NOT NULL DEFAULT '',
-                    original_text TEXT NOT NULL,
-                    platform_item_id TEXT NOT NULL DEFAULT '',
-                    source_url TEXT NOT NULL DEFAULT '',
-                    observed_at TEXT NOT NULL DEFAULT '',
-                    decision TEXT NOT NULL,
-                    state TEXT NOT NULL,
-                    sensitive_tags_json TEXT NOT NULL DEFAULT '[]',
-                    risk_level TEXT NOT NULL DEFAULT 'low',
-                    rationale TEXT NOT NULL DEFAULT '',
-                    voice_profile_json TEXT NOT NULL DEFAULT '{}',
-                    draft_text TEXT NOT NULL DEFAULT '',
-                    preview_payload_json TEXT NOT NULL DEFAULT '{}',
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    approved_at TEXT NOT NULL DEFAULT ''
-                );
-                INSERT INTO work_items (
-                    work_item_id, fingerprint, platform, item_type,
-                    counterparty_display_name, original_text, decision, state,
-                    created_at, updated_at
-                ) VALUES (
-                    'legacy-1', 'legacy-fingerprint', 'xiaohongshu', 'comment',
-                    '旧用户', '旧记录的模糊原文', 'draft_for_review', 'draft_pending_review',
-                    '2026-08-22T00:00:00Z', '2026-08-22T00:00:00Z'
-                );
-                """
+                (
+                    "\n"
+                    "                CREATE TABLE work_items (\n"
+                    "                    work_item_id TEXT PRIMARY KEY,\n"
+                    "                    fingerprint TEXT NOT NULL UNIQUE,\n"
+                    "                    platform TEXT NOT NULL,\n"
+                    "                    item_type TEXT NOT NULL,\n"
+                    "                    counterparty_key TEXT NOT NULL "
+                    "DEFAULT '',\n"
+                    "                    counterparty_display_name TEXT "
+                    "NOT NULL DEFAULT '',\n"
+                    "                    original_text TEXT NOT NULL,\n"
+                    "                    platform_item_id TEXT NOT NULL "
+                    "DEFAULT '',\n"
+                    "                    source_url TEXT NOT NULL DEFAULT "
+                    "'',\n"
+                    "                    observed_at TEXT NOT NULL DEFAULT "
+                    "'',\n"
+                    "                    decision TEXT NOT NULL,\n"
+                    "                    state TEXT NOT NULL,\n"
+                    "                    sensitive_tags_json TEXT NOT NULL "
+                    "DEFAULT '[]',\n"
+                    "                    risk_level TEXT NOT NULL DEFAULT "
+                    "'low',\n"
+                    "                    rationale TEXT NOT NULL DEFAULT "
+                    "'',\n"
+                    "                    voice_profile_json TEXT NOT NULL "
+                    "DEFAULT '{}',\n"
+                    "                    draft_text TEXT NOT NULL DEFAULT "
+                    "'',\n"
+                    "                    preview_payload_json TEXT NOT "
+                    "NULL DEFAULT '{}',\n"
+                    "                    created_at TEXT NOT NULL,\n"
+                    "                    updated_at TEXT NOT NULL,\n"
+                    "                    approved_at TEXT NOT NULL DEFAULT "
+                    "''\n"
+                    "                );\n"
+                    "                INSERT INTO work_items (\n"
+                    "                    work_item_id, fingerprint, "
+                    "platform, item_type,\n"
+                    "                    counterparty_display_name, "
+                    "original_text, decision, state,\n"
+                    "                    created_at, updated_at\n"
+                    "                ) VALUES (\n"
+                    "                    'legacy-1', 'legacy-fingerprint', "
+                    "'xiaohongshu', 'comment',\n"
+                    "                    '旧用户', '旧记录的模糊原文', "
+                    "'draft_for_review', 'draft_pending_review',\n"
+                    "                    '2026-08-22T00:00:00Z', "
+                    "'2026-08-22T00:00:00Z'\n"
+                    "                );\n"
+                    "                "
+                )
             )
         connection.close()
         migrated = LocalStore(legacy_path)
@@ -333,14 +408,16 @@ class PersonalWorkflowTests(unittest.TestCase):
         connection.close()
         with self.assertRaisesRegex(ValueError, "direction_verified"):
             self.workflow.filter_new(
-                [{
-                    "platform": "instagram",
-                    "item_type": "message",
-                    "counterparty_display_name": "reader",
-                    "counterparty_text": "hello",
-                    "conversation_relation": "direct_message",
-                    "role_resolution_source": "visible_thread_roles",
-                }]
+                [
+                    {
+                        "platform": "instagram",
+                        "item_type": "message",
+                        "counterparty_display_name": "reader",
+                        "counterparty_text": "hello",
+                        "conversation_relation": "direct_message",
+                        "role_resolution_source": "visible_thread_roles",
+                    }
+                ]
             )
 
 

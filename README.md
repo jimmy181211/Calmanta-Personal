@@ -88,3 +88,5 @@ python -m calmanta_personal put-object <文件路径>
 Personal 是低频、本人账号、可见页面范围内的实验性辅助。网站页面变化、掉线、验证码、风控或
 平台规则都可能让一次检查失败。不得绕过验证码、风控或访问控制；不得批量爬取；不得把登录
 凭证交给项目。需要稳定商业化接入时，仍应使用平台官方 API、OAuth 或合规合作伙伴能力。
+
+[Source structure and maintenance](docs/SOURCE_STRUCTURE.md)

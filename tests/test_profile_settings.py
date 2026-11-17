@@ -54,22 +54,34 @@ class ProfileSettingsTests(unittest.TestCase):
         self.assertEqual("record_only", preview["proposed"]["high"])
         self.assertEqual(before, self.profile_path.read_text(encoding="utf-8"))
 
-    def test_save_requires_confirmation_and_preserves_other_profile_fields(self) -> None:
+    def test_save_requires_confirmation_and_preserves_other_profile_fields(
+        self,
+    ) -> None:
         with self.assertRaisesRegex(ValueError, "SAVE"):
-            self.settings.save_risk_level_actions({"low": "generate_draft"}, "save")
+            self.settings.save_risk_level_actions(
+                {"low": "generate_draft"}, "save"
+            )
 
         result = self.settings.save_risk_level_actions(
             {"low": "generate_draft"},
             "SAVE",
         )
-        saved_profile = json.loads(self.profile_path.read_text(encoding="utf-8"))
+        saved_profile = json.loads(
+            self.profile_path.read_text(encoding="utf-8")
+        )
         self.assertTrue(result["saved"])
-        self.assertEqual("generate_draft", saved_profile["risk_level_actions"]["low"])
+        self.assertEqual(
+            "generate_draft", saved_profile["risk_level_actions"]["low"]
+        )
         self.assertEqual(300, saved_profile["max_reply_chars"])
-        self.assertEqual({"summary": "保持温和"}, saved_profile["voice_profile"])
+        self.assertEqual(
+            {"summary": "保持温和"}, saved_profile["voice_profile"]
+        )
 
     def test_only_two_risk_actions_are_allowed(self) -> None:
-        with self.assertRaisesRegex(ValueError, "record_only or generate_draft"):
+        with self.assertRaisesRegex(
+            ValueError, "record_only or generate_draft"
+        ):
             self.settings.preview_risk_level_actions({"low": "silent_record"})
         panel = format_settings_panel(self.settings.risk_level_actions())
         self.assertIn("风险策略和回复价值门槛都通过", panel)
@@ -81,7 +93,9 @@ class ProfileSettingsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Duplicate risk level"):
             parse_risk_changes(["low=record_only", "low=generate_draft"])
 
-    def test_settings_show_works_without_loading_database_or_portable_core(self) -> None:
+    def test_settings_show_works_without_loading_database_or_portable_core(
+        self,
+    ) -> None:
         output = io.StringIO()
         with redirect_stdout(output):
             exit_code = main(["--home", str(self.root), "settings", "show"])
@@ -91,7 +105,9 @@ class ProfileSettingsTests(unittest.TestCase):
         self.assertIn("Calmanta Personal 草稿设置", payload["settings_panel"])
         self.assertEqual(75, payload["reply_worthiness_threshold"])
         self.assertIn("我的口吻模板：0 个", payload["settings_panel"])
-        self.assertEqual("record_only", payload["risk_level_actions"]["no_risk"])
+        self.assertEqual(
+            "record_only", payload["risk_level_actions"]["no_risk"]
+        )
 
     def test_reply_worthiness_threshold_preview_and_save(self) -> None:
         before = self.profile_path.read_text(encoding="utf-8")
@@ -144,19 +160,38 @@ class ProfileSettingsTests(unittest.TestCase):
         )
         preview_output = io.StringIO()
         with redirect_stdout(preview_output):
-            preview_exit = main([
-                "--home", str(self.root), "settings", "template", "preview", "--input", str(input_path),
-            ])
+            preview_exit = main(
+                [
+                    "--home",
+                    str(self.root),
+                    "settings",
+                    "template",
+                    "preview",
+                    "--input",
+                    str(input_path),
+                ]
+            )
         preview = json.loads(preview_output.getvalue())
         self.assertEqual(0, preview_exit)
-        self.assertIn("口吻模板预览（尚未保存）", preview["voice_template_panel"])
+        self.assertIn(
+            "口吻模板预览（尚未保存）", preview["voice_template_panel"]
+        )
 
         save_output = io.StringIO()
         with redirect_stdout(save_output):
-            save_exit = main([
-                "--home", str(self.root), "settings", "template", "save", "--input", str(input_path),
-                "--confirm", "SAVE",
-            ])
+            save_exit = main(
+                [
+                    "--home",
+                    str(self.root),
+                    "settings",
+                    "template",
+                    "save",
+                    "--input",
+                    str(input_path),
+                    "--confirm",
+                    "SAVE",
+                ]
+            )
         saved = json.loads(save_output.getvalue())
         self.assertEqual(0, save_exit)
         self.assertTrue(saved["saved"])
@@ -180,7 +215,9 @@ class ProfileSettingsTests(unittest.TestCase):
             ["personal_attack"],
             "SAVE",
         )
-        self.assertEqual(["unverified_accusation", "personal_attack"], bound["when"])
+        self.assertEqual(
+            ["unverified_accusation", "personal_attack"], bound["when"]
+        )
         unbound = self.settings.remove_voice_template_binding(
             "template-1",
             "personal_attack",
@@ -211,7 +248,9 @@ class ProfileSettingsTests(unittest.TestCase):
         )
         self.assertIn("未命名草稿：暂未选择评论类别（草稿）", panel)
         with self.assertRaisesRegex(ValueError, "SAVE_DRAFT"):
-            self.settings.save_voice_template({**draft, "id": "draft-2"}, "SAVE")
+            self.settings.save_voice_template(
+                {**draft, "id": "draft-2"}, "SAVE"
+            )
 
 
 if __name__ == "__main__":

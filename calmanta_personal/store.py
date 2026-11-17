@@ -1,3 +1,5 @@
+"""SQLite persistence for observations, drafts, approvals, and audit events."""
+
 from __future__ import annotations
 
 import json
@@ -138,12 +140,18 @@ class LocalStore:
             record.pop("reply_worthiness_signals", [])
         )
         record["voice_profile_json"] = _json(record.pop("voice_profile", {}))
-        record["preview_payload_json"] = _json(record.pop("preview_payload", {}))
+        record["preview_payload_json"] = _json(
+            record.pop("preview_payload", {})
+        )
         values = [record.get(column, "") for column in columns]
         placeholders = ", ".join("?" for _ in columns)
         insert_sql = (
-            f"INSERT INTO work_items ({', '.join(columns)}) VALUES ({placeholders})"  # noqa: S608 - column names are a fixed list above.
-        )
+            "INSERT INTO work_items ("
+            f"{', '.join(columns)}"
+            ") VALUES ("
+            f"{placeholders}"
+            ")"
+        )  # noqa: S608 - column names are a fixed list above.
         try:
             with self._connect() as connection:
                 connection.execute(insert_sql, values)
@@ -182,7 +190,9 @@ class LocalStore:
             ).fetchone()
         return _row(row)
 
-    def list_items(self, limit: int = 50, state: str = "") -> list[dict[str, Any]]:
+    def list_items(
+        self, limit: int = 50, state: str = ""
+    ) -> list[dict[str, Any]]:
         bounded = max(1, min(limit, 200))
         query = "SELECT * FROM work_items"
         parameters: tuple[Any, ...] = ()
@@ -226,12 +236,15 @@ class LocalStore:
                 preview_payload["caption"] = draft_text
                 preview_payload["publish_status"] = "preview_only"
             connection.execute(
-                """
-                UPDATE work_items
-                SET draft_text = ?, preview_payload_json = ?, state = ?, decision = ?,
-                    updated_at = ?, approved_at = ''
-                WHERE work_item_id = ?
-                """,
+                (
+                    "\n"
+                    "                UPDATE work_items\n"
+                    "                SET draft_text = ?, "
+                    "preview_payload_json = ?, state = ?, decision = ?,\n"
+                    "                    updated_at = ?, approved_at = ''\n"
+                    "                WHERE work_item_id = ?\n"
+                    "                "
+                ),
                 (
                     draft_text,
                     _json(preview_payload),
@@ -241,7 +254,9 @@ class LocalStore:
                     work_item_id,
                 ),
             )
-            self._event(connection, work_item_id, "draft_edited", {}, updated_at)
+            self._event(
+                connection, work_item_id, "draft_edited", {}, updated_at
+            )
         return self._required_item(work_item_id)
 
     def approve(
@@ -253,13 +268,22 @@ class LocalStore:
     ) -> dict[str, Any]:
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT state, draft_text FROM work_items WHERE work_item_id = ?",
+                (
+                    "SELECT state, draft_text "
+                    "FROM work_items WHERE "
+                    "work_item_id = ?"
+                ),
                 (work_item_id,),
             ).fetchone()
             if row is None:
                 raise ValueError("Work item not found")
-            if row["state"] not in {"draft_pending_review", "preview_pending_review"}:
-                raise ValueError("Only a pending draft or post preview can be approved")
+            if row["state"] not in {
+                "draft_pending_review",
+                "preview_pending_review",
+            }:
+                raise ValueError(
+                    "Only a pending draft or post preview can be approved"
+                )
             if not row["draft_text"].strip():
                 raise ValueError("Approved content cannot be empty")
             connection.execute(
@@ -269,7 +293,13 @@ class LocalStore:
                     action_fingerprint, approved_at
                 ) VALUES (?, ?, 'OK', ?, ?, ?)
                 """,
-                (approval_id, work_item_id, row["draft_text"], action_fingerprint, approved_at),
+                (
+                    approval_id,
+                    work_item_id,
+                    row["draft_text"],
+                    action_fingerprint,
+                    approved_at,
+                ),
             )
             connection.execute(
                 """
@@ -296,17 +326,27 @@ class LocalStore:
             ).fetchone()
             if row is None:
                 raise ValueError("Work item not found")
-            if row["state"] in {"approved", "rejected", "hard_blocked", "completed"}:
+            if row["state"] in {
+                "approved",
+                "rejected",
+                "hard_blocked",
+                "completed",
+            }:
                 raise ValueError("This work item cannot be rejected")
             connection.execute(
-                """
-                UPDATE work_items
-                SET state = 'rejected', decision = 'user_rejected', updated_at = ?
-                WHERE work_item_id = ?
-                """,
+                (
+                    "\n"
+                    "                UPDATE work_items\n"
+                    "                SET state = 'rejected', decision = "
+                    "'user_rejected', updated_at = ?\n"
+                    "                WHERE work_item_id = ?\n"
+                    "                "
+                ),
                 (updated_at, work_item_id),
             )
-            self._event(connection, work_item_id, "user_rejected", {}, updated_at)
+            self._event(
+                connection, work_item_id, "user_rejected", {}, updated_at
+            )
         return self._required_item(work_item_id)
 
     def complete(self, work_item_id: str, updated_at: str) -> dict[str, Any]:
@@ -318,9 +358,14 @@ class LocalStore:
             if row is None:
                 raise ValueError("Work item not found")
             if row["state"] != "approved":
-                raise ValueError("Only an approved work item can be marked completed")
+                raise ValueError(
+                    "Only an approved work item can be marked completed"
+                )
             connection.execute(
-                "UPDATE work_items SET state = 'completed', updated_at = ? WHERE work_item_id = ?",
+                (
+                    "UPDATE work_items SET state = 'completed', updated_at "
+                    "= ? WHERE work_item_id = ?"
+                ),
                 (updated_at, work_item_id),
             )
             self._event(
@@ -335,11 +380,14 @@ class LocalStore:
     def record_object(self, metadata: dict[str, Any]) -> None:
         with self._connect() as connection:
             connection.execute(
-                """
-                INSERT OR IGNORE INTO objects (
-                    object_key, size_bytes, sha256, content_type, source_name, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?)
-                """,
+                (
+                    "\n"
+                    "                INSERT OR IGNORE INTO objects (\n"
+                    "                    object_key, size_bytes, sha256, "
+                    "content_type, source_name, created_at\n"
+                    "                ) VALUES (?, ?, ?, ?, ?, ?)\n"
+                    "                "
+                ),
                 (
                     metadata["object_key"],
                     metadata["size_bytes"],
@@ -380,10 +428,13 @@ class LocalStore:
         created_at: str,
     ) -> None:
         connection.execute(
-            """
-            INSERT INTO events (work_item_id, event_type, details_json, created_at)
-            VALUES (?, ?, ?, ?)
-            """,
+            (
+                "\n"
+                "            INSERT INTO events (work_item_id, event_type, "
+                "details_json, created_at)\n"
+                "            VALUES (?, ?, ?, ?)\n"
+                "            "
+            ),
             (work_item_id, event_type, _json(details), created_at),
         )
 
@@ -391,17 +442,26 @@ class LocalStore:
     def _migrate_work_item_roles(connection: sqlite3.Connection) -> None:
         columns = {
             str(row["name"])
-            for row in connection.execute("PRAGMA table_info(work_items)").fetchall()
+            for row in connection.execute(
+                "PRAGMA table_info(work_items)"
+            ).fetchall()
         }
         if "original_text" in columns and "counterparty_text" not in columns:
-            connection.execute("ALTER TABLE work_items RENAME COLUMN original_text TO counterparty_text")
+            connection.execute(
+                (
+                    "ALTER TABLE work_items RENAME COLUMN original_text TO "
+                    "counterparty_text"
+                )
+            )
             columns.remove("original_text")
             columns.add("counterparty_text")
         additions = {
             "owner_context_text": "TEXT NOT NULL DEFAULT ''",
             "conversation_relation": "TEXT NOT NULL DEFAULT 'unknown'",
             "direction_verified": "INTEGER NOT NULL DEFAULT 0",
-            "role_resolution_source": "TEXT NOT NULL DEFAULT 'legacy_unverified'",
+            ("role_resolution_source"): (
+                "TEXT NOT NULL DEFAULT 'legacy_unverified'"
+            ),
             "user_intent_text": "TEXT NOT NULL DEFAULT ''",
             "category": "TEXT NOT NULL DEFAULT '未分类'",
             "reply_worthiness_score": "INTEGER NOT NULL DEFAULT 0",
@@ -411,7 +471,14 @@ class LocalStore:
         for column, definition in additions.items():
             if column not in columns:
                 connection.execute(
-                    f"ALTER TABLE work_items ADD COLUMN {column} {definition}"  # noqa: S608 - values come from the fixed additions mapping above.
+                    (
+                        # values come from the fixed additions mapping above.
+                        "ALTER TABLE work_items "
+                        "ADD COLUMN "
+                        f"{column}"
+                        " "
+                        f"{definition}"  # noqa: S608
+                    )
                 )
         connection.execute(
             """
@@ -427,7 +494,9 @@ class LocalStore:
 
 
 def _json(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
 
 
 def _row(row: sqlite3.Row | None) -> dict[str, Any] | None:
