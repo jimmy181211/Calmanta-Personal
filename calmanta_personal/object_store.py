@@ -1,3 +1,5 @@
+"""Content-addressed local evidence files with bounded metadata."""
+
 from __future__ import annotations
 
 import hashlib
@@ -10,18 +12,24 @@ from .store import LocalStore
 
 
 class LocalObjectStore:
-    def __init__(self, root: Path, store: LocalStore, max_bytes: int = 50 * 1024 * 1024):
+    def __init__(
+        self, root: Path, store: LocalStore, max_bytes: int = 50 * 1024 * 1024
+    ):
         self.root = root.resolve()
         self.store = store
         self.max_bytes = max_bytes
 
-    def put_file(self, source: Path, created_at: str, content_type: str = "") -> dict[str, Any]:
+    def put_file(
+        self, source: Path, created_at: str, content_type: str = ""
+    ) -> dict[str, Any]:
         source = source.resolve()
         if not source.is_file():
             raise ValueError(f"Object source is not a file: {source}")
         size = source.stat().st_size
         if size > self.max_bytes:
-            raise ValueError(f"Object exceeds the {self.max_bytes}-byte local limit")
+            raise ValueError(
+                f"Object exceeds the {self.max_bytes}-byte local limit"
+            )
         digest = _sha256(source)
         suffix = source.suffix.lower()[:20]
         relative = Path(digest[:2]) / f"{digest}{suffix}"

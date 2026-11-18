@@ -1,3 +1,5 @@
+"""Locate and load the independent portable Core package."""
+
 from __future__ import annotations
 
 import os
@@ -49,8 +51,12 @@ def find_core_root() -> Path:
             return resolved
     searched = ", ".join(str(path) for path in candidates)
     raise CoreUnavailableError(
-        "Calmanta Core was not found. Keep Calmanta-Core and Calmanta-Personal "
-        f"side by side, or set CALMANTA_CORE_DIR. Searched: {searched}"
+        (
+            "Calmanta Core was not found. Keep Calmanta-Core and "
+            "Calmanta-Personal side by side, or set CALMANTA_CORE_DIR. "
+            "Searched: "
+            f"{searched}"
+        )
     )
 
 
