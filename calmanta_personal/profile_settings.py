@@ -37,8 +37,16 @@ from .profile_rules import (  # noqa: F401
 
 
 def ensure_local_profile(project_home: Path) -> Path:
-    """Create or migrate the user-only profile outside the tracked example
-    file.
+    """Locate the user-only profile, migrating legacy data before copying.
+
+    Returns:
+        The local profile path. An existing local file wins; otherwise a
+        legacy profile is moved, or the tracked example is copied.
+
+    Raises:
+        ValueError: Neither a local/legacy profile nor an example exists.
+        OSError: Directory creation, moving or copying fails. A directory
+            may already have been created when the operation fails.
     """
     config_dir = project_home / "config"
     local_path = config_dir / "profile.local.json"
@@ -65,10 +73,26 @@ class ProfileSettings:
         self.profile_path = profile_path.resolve()
 
     def risk_level_actions(self) -> dict[str, str]:
+        """Read and validate risk actions without changing the profile.
+
+        Returns:
+            A complete policy including defaults for missing risk levels.
+
+        Raises:
+            ValueError: The profile or its action settings are invalid.
+        """
         profile = self._profile()
         return _validated_risk_actions(profile.get("risk_level_actions", {}))
 
     def reply_worthiness_threshold(self) -> int:
+        """Read the configured reply threshold with its existing default.
+
+        Returns:
+            A validated integer threshold in the supported range.
+
+        Raises:
+            ValueError: The saved threshold fails validation.
+        """
         return _validated_reply_worthiness_threshold(
             self._profile().get(
                 "reply_worthiness_threshold",
@@ -107,8 +131,15 @@ class ProfileSettings:
         changes: dict[str, str],
         threshold: int | None,
     ) -> dict[str, Any]:
-        """Validate policy and threshold changes together without saving
-        them.
+        """Validate policy and threshold together without saving either one.
+
+        Returns:
+            Current/proposed values, changed categories and saved=False.
+            A None threshold retains the current value; unchanged requested
+            values are allowed, but an entirely empty request is rejected.
+
+        Raises:
+            ValueError: No changes were requested or validation fails.
         """
         current_actions = self.risk_level_actions()
         proposed_actions = (
@@ -151,8 +182,16 @@ class ProfileSettings:
         threshold: int | None,
         confirmation: str,
     ) -> dict[str, Any]:
-        """Persist the validated preview only after the required
-        confirmation.
+        """Validate both settings, then replace the profile after confirmation.
+
+        Returns:
+            The preview with saved=True after the atomic replacement succeeds.
+            Unrelated profile fields are retained.
+
+        Raises:
+            ValueError: Confirmation is not exactly SAVE or validation fails.
+            OSError: Reading or replacing the profile fails; temporary-file
+                cleanup is attempted even when writing fails.
         """
         if confirmation != "SAVE":
             raise ValueError(
@@ -186,6 +225,15 @@ class ProfileSettings:
         return {**preview, "saved": True}
 
     def voice_templates(self) -> list[dict[str, Any]]:
+        """Read saved template objects without normalizing their contents.
+
+        Returns:
+            Shallow copies of dictionary entries, or [] when none are saved.
+            Non-object entries are skipped; nested values remain shared.
+
+        Raises:
+            ValueError: The profile, voice section or collection is malformed.
+        """
         profile = self._profile()
         voice_profile = profile.get("voice_profile", {})
         if not isinstance(voice_profile, dict):
@@ -219,6 +267,14 @@ class ProfileSettings:
         return template
 
     def get_voice_template(self, template_id: str) -> dict[str, Any]:
+        """Look up one saved template by exact identity.
+
+        Returns:
+            A shallow copy of the first matching template.
+
+        Raises:
+            ValueError: The template does not exist or the profile is invalid.
+        """
         for template in self.voice_templates():
             if template.get("id") == template_id:
                 return template
@@ -378,6 +434,15 @@ class ProfileSettings:
         self._atomic_write(profile)
 
     def _profile(self) -> dict[str, Any]:
+        """Decode the current profile on every read.
+
+        Returns:
+            The decoded JSON object, including unrelated user fields.
+
+        Raises:
+            ValueError: The file is missing, malformed JSON or not an object.
+            OSError: The file exists but cannot be read.
+        """
         if not self.profile_path.is_file():
             raise ValueError(
                 f"Profile configuration not found: {self.profile_path}"
@@ -388,8 +453,16 @@ class ProfileSettings:
         return raw
 
     def _atomic_write(self, profile: dict[str, Any]) -> None:
-        """Replace the profile only after a temporary file is fully written
-        and synced.
+        """Write and sync a sibling temporary file before replacing the profile.
+
+        Unrelated fields must already be present in the supplied object. The
+        temporary file is removed in finally on success or failure; cleanup
+        errors can propagate too. No directory fsync is performed.
+
+        Raises:
+            OSError: Creation, sync, replacement or cleanup fails. Before a
+                successful replace, the old profile remains in place.
+            TypeError: The supplied profile cannot be serialized as JSON.
         """
         self.profile_path.parent.mkdir(parents=True, exist_ok=True)
         temporary_path: Path | None = None
